@@ -1,5 +1,5 @@
 const fs = require('fs').promises;
-const fs1 = require('fs');
+const createReadStream = require('fs').createReadStream;
 const path = require('path');
 const process = require('process');
 const { authenticate } = require('@google-cloud/local-auth');
@@ -88,6 +88,10 @@ async function listFiles(authClient) {
   });
 }
 
+/**
+ * Create a new file on google drive.
+ * @param {OAuth2Client} authClient An authorized OAuth2 client.
+ */
 async function uploadFile(authClient) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
@@ -95,7 +99,7 @@ async function uploadFile(authClient) {
   if(fileName) {
     const file = await drive.files.create({
       media: {
-        body: fs1.createReadStream(fileName)
+        body: createReadStream(fileName)
       },
       fields: 'id',
       requestBody: {
@@ -109,6 +113,10 @@ async function uploadFile(authClient) {
 
 }
 
+/**
+ * Update contents of existing file.
+ * @param {OAuth2Client} authClient An authorized OAuth2 client.
+ */
 async function updateFile(authClient) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
@@ -117,7 +125,7 @@ async function updateFile(authClient) {
   if(fileName && fileId) {
     const file = await drive.files.update({
       media: {
-        body: fs1.createReadStream(fileName),
+        body: createReadStream(fileName),
       },
       fileId: fileId,
     });
