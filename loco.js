@@ -1,69 +1,27 @@
-const fs = require('fs').promises;
 const createReadStream = require('fs').createReadStream;
+const createWriteStream = require('fs').createWriteStream;
 const path = require('path');
 const process = require('process');
-const { authenticate } = require('@google-cloud/local-auth');
 const { google } = require('googleapis');
 
-// If modifying these scopes, delete token.json.
+// Downloaded from while creating credentials of service account
+const pkey = require('./pk.json');
+
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
-const TOKEN_PATH = path.join(process.cwd(), 'token.json');
-const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
 /**
- * Reads previously authorized credentials from the save file.
- *
- * @return {Promise<OAuth2Client|null>}
- */
-async function loadSavedCredentialsIfExist() {
-  try {
-    const content = await fs.readFile(TOKEN_PATH);
-    const credentials = JSON.parse(content);
-    return google.auth.fromJSON(credentials);
-  } catch (err) {
-    return null;
-  }
-}
-
-/**
- * Serializes credentials to a file comptible with GoogleAUth.fromJSON.
- *
- * @param {OAuth2Client} client
- * @return {Promise<void>}
- */
-async function saveCredentials(client) {
-  const content = await fs.readFile(CREDENTIALS_PATH);
-  const keys = JSON.parse(content);
-  const key = keys.installed || keys.web;
-  const payload = JSON.stringify({
-    type: 'authorized_user',
-    client_id: key.client_id,
-    client_secret: key.client_secret,
-    refresh_token: client.credentials.refresh_token,
-  });
-  await fs.writeFile(TOKEN_PATH, payload);
-}
-
-/**
- * Load or request or authorization to call APIs.
+ * Authorize with service account and get jwt client
  *
  */
 async function authorize() {
-  let client = await loadSavedCredentialsIfExist();
-  if (client) {
-    return client;
-  }
-  client = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: CREDENTIALS_PATH,
-  });
-  if (client.credentials) {
-    await saveCredentials(client);
-  }
-  return client;
+  const jwtClient = new google.auth.JWT(
+    pkey.client_email,
+    null,
+    pkey.private_key,
+    SCOPES
+  )
+  await jwtClient.authorize();
+  return jwtClient;
 }
 
 /**
@@ -96,7 +54,7 @@ async function uploadFile(authClient) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   const fileName = process.argv[3];
-  if(fileName) {
+  if (fileName) {
     const file = await drive.files.create({
       media: {
         body: createReadStream(fileName)
@@ -109,7 +67,7 @@ async function uploadFile(authClient) {
     console.log(file.data.id)
   }
   else
-   console.log("Please specify a file name")
+    console.log("Please specify a file name")
 
 }
 
@@ -121,20 +79,53 @@ async function updateFile(authClient) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   const fileName = process.argv[3], fileId = process.argv[4];
-  
-  if(fileName && fileId) {
+
+  if (fileName && fileId) {
     const file = await drive.files.update({
       media: {
         body: createReadStream(fileName),
       },
       fileId: fileId,
     });
-  
+
     console.log(file.data.id)
   }
   else
     console.log("Please specify file name/file id")
-  
+
+}
+
+/**
+ * Download contents of existing file.
+ * @param {OAuth2Client} authClient An authorized OAuth2 client.
+ */
+async function downloadFile(authClient) {
+  const drive = google.drive({ version: 'v3', auth: authClient });
+
+  const fileName = process.argv[3], fileId = process.argv[4];
+
+  if (fileName && fileId) {
+    let dest = createWriteStream(fileName);
+    drive.files.get(
+      { fileId: fileId, alt: "media" },
+      { responseType: "stream" },
+      (err, { data }) => {
+        if (err) {
+          console.log(err);
+          return;
+        }
+        data
+          .on("end", () => console.log("Done."))
+          .on("error", (err) => {
+            console.log(err);
+            return process.exit();
+          })
+          .pipe(dest);
+      }
+    );
+  }
+  else
+    console.log("Please specify file name/file id")
 }
 
 const action = process.argv[2];
@@ -149,10 +140,14 @@ switch (action) {
   case 'update':
     authorize().then(updateFile).catch(console.error);
     break;
+  case 'download':
+    authorize().then(downloadFile).catch(console.error);
+    break;
 
   default:
     console.log(`Please specify action from one of these
 1. list: view all the files
 2. upload: upload a file e.g. node loco.js upload <filename>
-3. update: update the file e.g. node loco.js update <filename> <file_id>`);
+3. update: update the file e.g. node loco.js update <filename> <file_id>
+4. download: download the file e.g. node loco.js update <filename> <file_id>`);
 }
